@@ -169,14 +169,17 @@ class AndroidWifiDataSource(private val context: Context) : WifiDataSource {
     private fun readConnectedWifi(): ConnectedWifi? {
         if (!hasScanPermission()) return null
         return try {
-            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val capabilityInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 connectivityManager?.activeNetwork?.let { network ->
-                    connectivityManager.getNetworkCapabilities(network)?.transportInfo as? WifiInfo
+                    connectivityManager.getNetworkCapabilities(network)
+                        ?.takeIf { it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) }
+                        ?.transportInfo as? WifiInfo
                 }
-            } else {
-                @Suppress("DEPRECATION") wifiManager?.connectionInfo
-            } ?: return null
-            if (info.networkId == -1 || info.rssi <= -127) return null
+            } else null
+            @Suppress("DEPRECATION")
+            val legacyInfo = wifiManager?.connectionInfo
+            val info = listOfNotNull(capabilityInfo, legacyInfo).firstOrNull { it.rssi > -127 }
+                ?: return null
             ConnectedWifi(
                 ssid = info.ssid.orEmpty().trim('"').takeUnless { it == "<unknown ssid>" }.orEmpty(),
                 bssid = info.bssid.orEmpty(),

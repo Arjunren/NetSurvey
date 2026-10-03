@@ -10,6 +10,7 @@ The primary field target is the POCO F5. The app remains useful on other Android
 - PNG/JPEG floor-plan import through Android Photo Picker with content and size validation
 - Normalized floor-plan coordinates and two-point scale calibration
 - Permission-aware Wi-Fi scanner with fresh/cached status, scan age, BSSID, RSSI, band, channel, security capabilities, width, and reported Wi-Fi standard
+- Named Wi-Fi scanner snapshots with frozen signal/network values, local dashboard history, individual delete, and Clear All
 - Connected-AP signal meter with rolling average, min/max, standard deviation, history, and editable RSSI thresholds
 - Tap-to-measure point surveys that preserve raw and calibrated RSSI independently
 - Measured-point RSSI heatmaps using bounded, cancellable inverse-distance weighting; interpolated areas are labeled as such
@@ -52,6 +53,7 @@ Release signing is intentionally external. Create a private keystore, provide cr
 ## Permissions
 
 - `ACCESS_WIFI_STATE`: read Wi-Fi state and results
+- `ACCESS_NETWORK_STATE`: identify the currently connected Wi-Fi network for Signal Meter
 - `CHANGE_WIFI_STATE`: request a user-initiated scan
 - `ACCESS_COARSE_LOCATION`: paired with precise location in the Android runtime request
 - `ACCESS_FINE_LOCATION`: required by current Android APIs for `startScan()` / `getScanResults()`

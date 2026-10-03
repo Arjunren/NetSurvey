@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.arjunren.netsurvey.data.local.FloorEntity
 import com.arjunren.netsurvey.data.local.NetSurveyDatabase
 import com.arjunren.netsurvey.data.local.ProjectEntity
+import com.arjunren.netsurvey.data.local.SavedWifiSnapshotEntity
 import com.arjunren.netsurvey.data.local.SurveyPointEntity
 import com.arjunren.netsurvey.data.local.SurveySessionEntity
 import com.arjunren.netsurvey.data.local.WifiObservationEntity
@@ -41,5 +42,51 @@ class DatabaseTest {
         database.dao().deleteProject(project)
         assertEquals(0, database.dao().observeProjects().first().size)
         assertEquals(0, database.dao().observePoints(survey).first().size)
+    }
+
+    @Test fun projectsAndSavedWifiSnapshotsCanBeCreatedAndDeleted() = runBlocking {
+        val repository = NetSurveyRepository(database)
+        val projectId = repository.createProject("Warehouse", "Customer", "Engineer")
+        assertEquals("Warehouse", database.dao().project(projectId)?.name)
+
+        val firstId = database.dao().insertSavedWifiSnapshot(
+            SavedWifiSnapshotEntity(
+                name = "Loading dock AP",
+                description = "Captured before antenna adjustment",
+                ssid = "WAREHOUSE",
+                bssid = "AA:BB:CC:DD:EE:FF",
+                rssi = -67,
+                frequencyMhz = 5180,
+                channel = 36,
+                band = "5 GHz",
+                capabilities = "[WPA2]",
+                channelWidthMhz = 80,
+                wifiStandard = "Wi-Fi 5",
+                observedAt = 100,
+                savedAt = 200,
+                connected = false,
+            ),
+        )
+        database.dao().insertSavedWifiSnapshot(
+            SavedWifiSnapshotEntity(
+                name = "Office AP",
+                ssid = "OFFICE",
+                bssid = "11:22:33:44:55:66",
+                rssi = -48,
+                frequencyMhz = 2412,
+                channel = 1,
+                band = "2.4 GHz",
+                capabilities = "[WPA3]",
+                observedAt = 300,
+                savedAt = 400,
+                connected = true,
+            ),
+        )
+
+        assertEquals(2, database.dao().observeSavedWifiSnapshots().first().size)
+        database.dao().deleteSavedWifiSnapshot(firstId)
+        assertEquals(1, database.dao().observeSavedWifiSnapshots().first().size)
+        database.dao().clearSavedWifiSnapshots()
+        assertEquals(0, database.dao().observeSavedWifiSnapshots().first().size)
     }
 }

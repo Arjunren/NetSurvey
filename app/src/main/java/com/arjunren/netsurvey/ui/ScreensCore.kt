@@ -24,6 +24,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apartment
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Map
@@ -59,6 +61,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.arjunren.netsurvey.data.local.ProjectEntity
+import com.arjunren.netsurvey.data.local.SavedWifiSnapshotEntity
 import java.text.DateFormat
 import java.util.Date
 
@@ -71,6 +74,8 @@ fun DashboardScreen(viewModel: MainViewModel, navigate: (AppScreen) -> Unit) {
     val aps by viewModel.accessPoints.collectAsStateWithLifecycle()
     val surveys by viewModel.surveys.collectAsStateWithLifecycle()
     val rows by viewModel.surveyRows.collectAsStateWithLifecycle()
+    val savedReadings by viewModel.savedWifiSnapshots.collectAsStateWithLifecycle()
+    var confirmClearReadings by remember { mutableStateOf(false) }
     val weakCount = rows.groupBy { it.pointId }.count { (_, values) -> values.maxOfOrNull { it.displayedRssi }?.let { it < -72 } == true }
 
     LazyColumn(
@@ -94,6 +99,7 @@ fun DashboardScreen(viewModel: MainViewModel, navigate: (AppScreen) -> Unit) {
                 MetricCard("Points", points.size.toString(), Icons.Default.Speed)
                 MetricCard("Access points", aps.size.toString(), Icons.Default.NetworkWifi)
                 MetricCard("Weak zones", weakCount.toString(), Icons.Default.Map)
+                MetricCard("Saved readings", savedReadings.size.toString(), Icons.Default.NetworkWifi)
             }
         }
         item { Text("Quick actions", style = MaterialTheme.typography.titleLarge) }
@@ -116,6 +122,63 @@ fun DashboardScreen(viewModel: MainViewModel, navigate: (AppScreen) -> Unit) {
                     }
                 }
             }
+        }
+        if (savedReadings.isNotEmpty()) {
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column {
+                        Text("Saved Wi-Fi readings", style = MaterialTheme.typography.titleLarge)
+                        Text("Frozen scanner values stored in the local database")
+                    }
+                    TextButton(onClick = { confirmClearReadings = true }) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = null)
+                        Text("Clear all")
+                    }
+                }
+            }
+            items(savedReadings, key = { "saved-${it.id}" }) { reading ->
+                SavedWifiReadingRow(reading, onDelete = { viewModel.deleteWifiSnapshot(reading.id) })
+            }
+        }
+    }
+
+    if (confirmClearReadings) {
+        AlertDialog(
+            onDismissRequest = { confirmClearReadings = false },
+            title = { Text("Clear saved readings?") },
+            text = { Text("This permanently deletes all saved Wi-Fi scanner snapshots from this device.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearWifiSnapshots()
+                    confirmClearReadings = false
+                }) { Text("Clear all") }
+            },
+            dismissButton = { TextButton(onClick = { confirmClearReadings = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun SavedWifiReadingRow(reading: SavedWifiSnapshotEntity, onDelete: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(reading.name, style = MaterialTheme.typography.titleMedium)
+                    if (reading.description.isNotBlank()) Text(reading.description)
+                }
+                Text("${reading.rssi} dBm", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = "Delete ${reading.name}") }
+            }
+            Text(reading.ssid.ifBlank { "Hidden SSID" }, style = MaterialTheme.typography.titleSmall)
+            Text(reading.bssid, style = MaterialTheme.typography.bodySmall)
+            Text("${reading.band} • channel ${reading.channel ?: "?"} • ${reading.frequencyMhz} MHz${reading.channelWidthMhz?.let { " • $it MHz" }.orEmpty()}")
+            reading.wifiStandard?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
+            if (reading.capabilities.isNotBlank()) Text(reading.capabilities, style = MaterialTheme.typography.labelSmall)
+            Text(
+                "Observed ${DateFormat.getDateTimeInstance().format(Date(reading.observedAt))} • saved ${DateFormat.getDateTimeInstance().format(Date(reading.savedAt))}",
+                style = MaterialTheme.typography.labelSmall,
+            )
         }
     }
 }
@@ -148,6 +211,7 @@ fun ProjectsScreen(viewModel: MainViewModel) {
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val floorPlan by viewModel.floorPlan.collectAsStateWithLifecycle()
     var createProject by remember { mutableStateOf(false) }
+    var creatingProject by remember { mutableStateOf(false) }
     var addFloor by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(viewModel::importFloorPlan) }
 
@@ -209,9 +273,15 @@ fun ProjectsScreen(viewModel: MainViewModel) {
     }
 
     if (createProject) {
-        ProjectDialog(onDismiss = { createProject = false }) { name, customer, engineer ->
-            viewModel.createProject(name, customer, engineer)
-            createProject = false
+        ProjectDialog(
+            saving = creatingProject,
+            onDismiss = { if (!creatingProject) createProject = false },
+        ) { name, customer, engineer ->
+            creatingProject = true
+            viewModel.createProject(name, customer, engineer) { success ->
+                creatingProject = false
+                if (success) createProject = false
+            }
         }
     }
     if (addFloor) {
@@ -238,7 +308,7 @@ private fun ProjectRow(project: ProjectEntity, selected: Boolean, onClick: () ->
 }
 
 @Composable
-private fun ProjectDialog(onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
+private fun ProjectDialog(saving: Boolean, onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
     var customer by remember { mutableStateOf("") }
     var engineer by remember { mutableStateOf("") }
@@ -250,10 +320,11 @@ private fun ProjectDialog(onDismiss: () -> Unit, onSave: (String, String, String
                 OutlinedTextField(name, { name = it }, label = { Text("Project name *") }, singleLine = true)
                 OutlinedTextField(customer, { customer = it }, label = { Text("Customer / site") }, singleLine = true)
                 OutlinedTextField(engineer, { engineer = it }, label = { Text("Engineer") }, singleLine = true)
+                if (name.isBlank()) Text("Enter a project name to enable Create.", style = MaterialTheme.typography.labelMedium)
             }
         },
-        confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onSave(name, customer, engineer) }) { Text("Create") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(enabled = name.isNotBlank() && !saving, onClick = { onSave(name, customer, engineer) }) { Text(if (saving) "Creating…" else "Create") } },
+        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

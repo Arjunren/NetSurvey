@@ -43,7 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -102,9 +101,8 @@ fun NetSurveyApp(viewModel: MainViewModel) {
                         selected = screen.route == route,
                         onClick = {
                             navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                popUpTo(AppScreen.Dashboard.route) { inclusive = false }
                                 launchSingleTop = true
-                                restoreState = true
                             }
                             scope.launch { drawerState.close() }
                         },

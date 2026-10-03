@@ -90,6 +90,8 @@ fun ScannerScreen(viewModel: MainViewModel) {
     val status by viewModel.scanStatus.collectAsStateWithLifecycle()
     var band by remember { mutableStateOf("All") }
     var sort by remember { mutableStateOf("RSSI") }
+    var selectedNetwork by remember { mutableStateOf<WifiNetwork?>(null) }
+    var savingSnapshot by remember { mutableStateOf(false) }
     val networks = (status as? ScanStatus.Results)?.networks.orEmpty().let { list ->
         val filtered = if (band == "All") list else list.filter { it.band == band }
         when (sort) { "SSID" -> filtered.sortedBy { it.ssid }; "Channel" -> filtered.sortedBy { it.channel }; else -> filtered.sortedByDescending { it.rssi } }
@@ -125,14 +127,34 @@ fun ScannerScreen(viewModel: MainViewModel) {
                 listOf("RSSI", "SSID", "Channel").forEach { item -> FilterChip(selected = sort == item, onClick = { sort = item }, label = { Text("Sort $item") }) }
             }
         }
-        items(networks, key = { "${it.bssid}-${it.frequencyMhz}" }) { network -> NetworkRow(network) }
+        items(networks, key = { "${it.bssid}-${it.frequencyMhz}" }) { network ->
+            NetworkRow(network, onClick = { selectedNetwork = network })
+        }
         if (networks.isEmpty() && status !is ScanStatus.Scanning) item { EmptyState("No scan results", "Grant permissions, enable Wi-Fi and Location services, then request a scan.") }
+    }
+
+    selectedNetwork?.let { network ->
+        WifiSnapshotDialog(
+            network = network,
+            saving = savingSnapshot,
+            onDismiss = { if (!savingSnapshot) selectedNetwork = null },
+            onSave = { name, description ->
+                savingSnapshot = true
+                viewModel.saveWifiSnapshot(network, name, description) { success ->
+                    savingSnapshot = false
+                    if (success) selectedNetwork = null
+                }
+            },
+        )
     }
 }
 
 @Composable
-private fun NetworkRow(network: WifiNetwork) {
-    Card(colors = if (network.connected) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.cardColors()) {
+private fun NetworkRow(network: WifiNetwork, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        colors = if (network.connected) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.cardColors(),
+    ) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("${network.rssi}", fontSize = 25.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             Text(" dBm", style = MaterialTheme.typography.labelSmall)
@@ -141,10 +163,50 @@ private fun NetworkRow(network: WifiNetwork) {
                 Text(network.bssid, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                 Text("${network.band} • ch ${network.channel ?: "?"} • ${network.frequencyMhz} MHz${network.channelWidthMhz?.let { " • $it MHz" }.orEmpty()}")
                 Text(network.capabilities, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                Text("Tap to save this reading", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
             if (network.connected) Text("CONNECTED", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
         }
     }
+}
+
+@Composable
+private fun WifiSnapshotDialog(
+    network: WifiNetwork,
+    saving: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+) {
+    var name by remember(network.bssid, network.timestampMillis) {
+        mutableStateOf(network.ssid.ifBlank { "Hidden network" })
+    }
+    var description by remember(network.bssid, network.timestampMillis) { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Save Wi-Fi reading") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${network.rssi} dBm • ${network.band} • channel ${network.channel ?: "?"}", style = MaterialTheme.typography.titleMedium)
+                Text(network.bssid, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name *") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description") },
+                    minLines = 2,
+                    maxLines = 4,
+                )
+                Text("The current RSSI and network details will be saved as a fixed snapshot and will not change with later scans.", style = MaterialTheme.typography.labelMedium)
+            }
+        },
+        confirmButton = { TextButton(enabled = name.isNotBlank() && !saving, onClick = { onSave(name, description) }) { Text(if (saving) "Saving…" else "Save") } },
+        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -174,7 +236,12 @@ fun SignalMeterScreen(viewModel: MainViewModel) {
     }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { WifiPermissionCard() }
+        item {
+            WifiPermissionCard {
+                samples.clear()
+                running = true
+            }
+        }
         item {
             Surface(color = qualityColor(quality), shape = MaterialTheme.shapes.extraLarge) {
                 Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -194,6 +261,16 @@ fun SignalMeterScreen(viewModel: MainViewModel) {
             }
         }
         item { SignalChart(samples) }
+        if (running && connected == null) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                    Text(
+                        "No readable Wi-Fi connection yet. Connect this phone to Wi-Fi, grant precise location and Nearby Wi-Fi access, and keep Location services enabled.",
+                        Modifier.padding(16.dp),
+                    )
+                }
+            }
+        }
         connected?.let { info ->
             item {
                 Card {

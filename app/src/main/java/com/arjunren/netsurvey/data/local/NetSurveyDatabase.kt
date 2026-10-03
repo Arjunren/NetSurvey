@@ -186,6 +186,28 @@ data class WifiObservationEntity(
 )
 
 @Entity(
+    tableName = "saved_wifi_snapshots",
+    indices = [Index("savedAt"), Index("bssid")],
+)
+data class SavedWifiSnapshotEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val description: String = "",
+    val ssid: String,
+    val bssid: String,
+    val rssi: Int,
+    val frequencyMhz: Int,
+    val channel: Int?,
+    val band: String,
+    val capabilities: String,
+    val channelWidthMhz: Int? = null,
+    val wifiStandard: String? = null,
+    val observedAt: Long,
+    val savedAt: Long = System.currentTimeMillis(),
+    val connected: Boolean,
+)
+
+@Entity(
     tableName = "walls",
     foreignKeys = [ForeignKey(FloorEntity::class, ["id"], ["floorId"], onDelete = ForeignKey.CASCADE)],
     indices = [Index("floorId")],
@@ -329,6 +351,9 @@ interface NetSurveyDao {
     @Query("SELECT * FROM wifi_observations WHERE pointId = :pointId ORDER BY displayedRssi DESC")
     fun observeObservations(pointId: Long): Flow<List<WifiObservationEntity>>
 
+    @Query("SELECT * FROM saved_wifi_snapshots ORDER BY savedAt DESC, id DESC")
+    fun observeSavedWifiSnapshots(): Flow<List<SavedWifiSnapshotEntity>>
+
     @Query("""
         SELECT p.id AS pointId, p.surveyId, p.floorId, p.xNormalized, p.yNormalized,
                p.timestamp AS pointTimestamp, p.confidence, o.ssid, o.bssid, o.rawRssi,
@@ -366,6 +391,7 @@ interface NetSurveyDao {
     @Insert suspend fun insertSurvey(value: SurveySessionEntity): Long
     @Insert suspend fun insertPoint(value: SurveyPointEntity): Long
     @Insert suspend fun insertObservations(values: List<WifiObservationEntity>)
+    @Insert suspend fun insertSavedWifiSnapshot(value: SavedWifiSnapshotEntity): Long
     @Insert suspend fun insertReport(value: ReportEntity): Long
     @Insert suspend fun insertCoverageProfile(value: CoverageProfileEntity): Long
 
@@ -378,6 +404,8 @@ interface NetSurveyDao {
     @Query("DELETE FROM survey_sessions WHERE id = :id") suspend fun deleteSurvey(id: Long)
     @Query("DELETE FROM survey_points WHERE id = :id") suspend fun deletePoint(id: Long)
     @Query("DELETE FROM access_points WHERE id = :id") suspend fun deleteAccessPoint(id: Long)
+    @Query("DELETE FROM saved_wifi_snapshots WHERE id = :id") suspend fun deleteSavedWifiSnapshot(id: Long)
+    @Query("DELETE FROM saved_wifi_snapshots") suspend fun clearSavedWifiSnapshots()
 
     @Query("SELECT * FROM projects WHERE id = :projectId") suspend fun exportProject(projectId: Long): ProjectEntity?
     @Query("SELECT * FROM floors WHERE projectId = :projectId") suspend fun exportFloors(projectId: Long): List<FloorEntity>
@@ -395,8 +423,9 @@ interface NetSurveyDao {
         SurveyPointEntity::class, WifiObservationEntity::class, WallEntity::class,
         CoverageProfileEntity::class, DeviceCalibrationEntity::class,
         InstallationPhotoEntity::class, ChecklistItemEntity::class, ReportEntity::class,
+        SavedWifiSnapshotEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class NetSurveyDatabase : RoomDatabase() {
@@ -413,10 +442,38 @@ abstract class NetSurveyDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `saved_wifi_snapshots` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `description` TEXT NOT NULL,
+                        `ssid` TEXT NOT NULL,
+                        `bssid` TEXT NOT NULL,
+                        `rssi` INTEGER NOT NULL,
+                        `frequencyMhz` INTEGER NOT NULL,
+                        `channel` INTEGER,
+                        `band` TEXT NOT NULL,
+                        `capabilities` TEXT NOT NULL,
+                        `channelWidthMhz` INTEGER,
+                        `wifiStandard` TEXT,
+                        `observedAt` INTEGER NOT NULL,
+                        `savedAt` INTEGER NOT NULL,
+                        `connected` INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_saved_wifi_snapshots_savedAt` ON `saved_wifi_snapshots` (`savedAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_saved_wifi_snapshots_bssid` ON `saved_wifi_snapshots` (`bssid`)")
+            }
+        }
+
         fun create(context: Context): NetSurveyDatabase = Room.databaseBuilder(
             context.applicationContext,
             NetSurveyDatabase::class.java,
             "netsurvey.db",
-        ).addMigrations(MIGRATION_1_2).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
     }
 }

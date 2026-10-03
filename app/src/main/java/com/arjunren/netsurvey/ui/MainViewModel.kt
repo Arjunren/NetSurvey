@@ -12,6 +12,7 @@ import com.arjunren.netsurvey.data.local.AccessPointEntity
 import com.arjunren.netsurvey.data.local.FloorEntity
 import com.arjunren.netsurvey.data.local.FloorPlanEntity
 import com.arjunren.netsurvey.data.local.ProjectEntity
+import com.arjunren.netsurvey.data.local.SavedWifiSnapshotEntity
 import com.arjunren.netsurvey.data.local.SurveyObservationRow
 import com.arjunren.netsurvey.data.local.SurveyPointEntity
 import com.arjunren.netsurvey.data.local.SurveySessionEntity
@@ -20,6 +21,7 @@ import com.arjunren.netsurvey.domain.applyCalibration
 import com.arjunren.netsurvey.storage.FloorPlanImporter
 import com.arjunren.netsurvey.storage.InstallationPhotoImporter
 import com.arjunren.netsurvey.wifi.ScanStatus
+import com.arjunren.netsurvey.wifi.WifiNetwork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -52,6 +54,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val projects = dao.observeProjects().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val settings = container.settings.settings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettings())
     val scanStatus = container.wifi.scanStatus
+    val savedWifiSnapshots = dao.observeSavedWifiSnapshots()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _selection = MutableStateFlow(AppSelection())
     val selection: StateFlow<AppSelection> = _selection
@@ -131,9 +135,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _selection.value = _selection.value.copy(surveyId = id)
     }
 
-    fun createProject(name: String, customer: String, engineer: String) = launchAction("Project created") {
+    fun createProject(
+        name: String,
+        customer: String,
+        engineer: String,
+        onComplete: (Boolean) -> Unit = {},
+    ) = launchAction("Project created", onComplete) {
         val id = repository.createProject(name, customer, engineer)
         selectProject(id)
+    }
+
+    fun saveWifiSnapshot(
+        network: WifiNetwork,
+        name: String,
+        description: String,
+        onComplete: (Boolean) -> Unit = {},
+    ) = launchAction("Wi-Fi reading saved", onComplete) {
+        require(name.isNotBlank()) { "A name is required." }
+        dao.insertSavedWifiSnapshot(
+            SavedWifiSnapshotEntity(
+                name = name.trim(),
+                description = description.trim(),
+                ssid = network.ssid,
+                bssid = network.bssid,
+                rssi = network.rssi,
+                frequencyMhz = network.frequencyMhz,
+                channel = network.channel,
+                band = network.band,
+                capabilities = network.capabilities,
+                channelWidthMhz = network.channelWidthMhz,
+                wifiStandard = network.wifiStandard,
+                observedAt = network.timestampMillis,
+                connected = network.connected,
+            ),
+        )
+    }
+
+    fun deleteWifiSnapshot(id: Long) = launchAction("Saved Wi-Fi reading deleted") {
+        dao.deleteSavedWifiSnapshot(id)
+    }
+
+    fun clearWifiSnapshots() = launchAction("Saved Wi-Fi readings cleared") {
+        dao.clearSavedWifiSnapshots()
     }
 
     fun addFloor(name: String) = launchAction("Floor added") {
@@ -249,11 +292,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         selectProject(id)
     }
 
-    private fun launchAction(success: String, action: suspend () -> Unit) {
+    private fun launchAction(
+        success: String,
+        onComplete: ((Boolean) -> Unit)? = null,
+        action: suspend () -> Unit,
+    ) {
         viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { action() } }
-                .onSuccess { _messages.emit(UiMessage.Success(success)) }
+            val result = runCatching { withContext(Dispatchers.IO) { action() } }
+            result.onSuccess { _messages.emit(UiMessage.Success(success)) }
                 .onFailure { error -> _messages.emit(UiMessage.Error(error.message ?: "The operation could not be completed.")) }
+            onComplete?.invoke(result.isSuccess)
         }
     }
 }
