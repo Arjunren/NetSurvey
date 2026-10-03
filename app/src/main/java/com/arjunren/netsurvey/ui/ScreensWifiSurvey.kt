@@ -73,7 +73,6 @@ import com.arjunren.netsurvey.NetSurveyApplication
 import com.arjunren.netsurvey.data.local.FloorPlanEntity
 import com.arjunren.netsurvey.data.local.SurveyPointEntity
 import com.arjunren.netsurvey.domain.RssiThresholds
-import com.arjunren.netsurvey.domain.SignalQuality
 import com.arjunren.netsurvey.domain.rollingStatistics
 import com.arjunren.netsurvey.wifi.ConnectedWifi
 import com.arjunren.netsurvey.wifi.ScanStatus
@@ -92,19 +91,50 @@ fun ScannerScreen(viewModel: MainViewModel) {
     var sort by remember { mutableStateOf("RSSI") }
     var selectedNetwork by remember { mutableStateOf<WifiNetwork?>(null) }
     var savingSnapshot by remember { mutableStateOf(false) }
-    val networks = (status as? ScanStatus.Results)?.networks.orEmpty().let { list ->
+    var latestNetworks by remember { mutableStateOf(emptyList<WifiNetwork>()) }
+    var autoScan by remember { mutableStateOf(false) }
+    val resultNetworks = (status as? ScanStatus.Results)?.networks
+    LaunchedEffect(resultNetworks) {
+        resultNetworks?.let { latestNetworks = it }
+    }
+    LaunchedEffect(autoScan) {
+        while (autoScan) {
+            delay(30_000L)
+            viewModel.requestScan()
+        }
+    }
+    val networks = latestNetworks.let { list ->
         val filtered = if (band == "All") list else list.filter { it.band == band }
         when (sort) { "SSID" -> filtered.sortedBy { it.ssid }; "Channel" -> filtered.sortedBy { it.channel }; else -> filtered.sortedByDescending { it.rssi } }
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { WifiPermissionCard { viewModel.requestScan() } }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("Nearby network snapshot", style = MaterialTheme.typography.headlineSmall)
-                    Text("Nearby BSSID values only change when Android provides scan results.")
+            WifiPermissionCard {
+                viewModel.requestScan()
+                autoScan = true
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Nearby network scanner", style = MaterialTheme.typography.headlineSmall)
+                Text("Scan results update when Android provides a new snapshot. Automatic refresh runs every 30 seconds and keeps the previous list visible while refreshing.")
+                Button(
+                    onClick = {
+                        viewModel.requestScan()
+                        autoScan = true
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null)
+                    Text(if (autoScan) "Scan now" else "Scan & start live updates", modifier = Modifier.padding(start = 8.dp))
                 }
-                Button(onClick = viewModel::requestScan) { Icon(Icons.Default.Refresh, null); Text("Scan") }
+                if (autoScan) {
+                    OutlinedButton(onClick = { autoScan = false }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Stop, contentDescription = null)
+                        Text("Stop live updates", modifier = Modifier.padding(start = 8.dp))
+                    }
+                    Text("Live updates active • next scan within 30 seconds • Android may return cached results when scans are throttled", style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
         if (status is ScanStatus.Scanning) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
@@ -243,7 +273,7 @@ fun SignalMeterScreen(viewModel: MainViewModel) {
             }
         }
         item {
-            Surface(color = qualityColor(quality), shape = MaterialTheme.shapes.extraLarge) {
+            Surface(color = Color.Black, contentColor = Color.White, shape = MaterialTheme.shapes.extraLarge) {
                 Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(stats?.current?.toInt()?.toString() ?: "—", fontSize = 72.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
                     Text("dBm", style = MaterialTheme.typography.titleLarge)
@@ -317,15 +347,6 @@ private fun SignalChart(samples: List<Int>) {
             }
         }
     }
-}
-
-private fun qualityColor(quality: SignalQuality?) = when (quality) {
-    SignalQuality.EXCELLENT -> Color(0xFFCDEFC9)
-    SignalQuality.GOOD -> Color(0xFFDFF3B6)
-    SignalQuality.ACCEPTABLE -> Color(0xFFFFE9A8)
-    SignalQuality.WEAK -> Color(0xFFFFD0A8)
-    SignalQuality.POOR -> Color(0xFFFFC6C2)
-    null -> Color(0xFFE2E8E9)
 }
 
 @Composable

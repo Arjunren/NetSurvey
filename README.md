@@ -9,7 +9,7 @@ The primary field target is the POCO F5. The app remains useful on other Android
 - Local projects, floors, survey sessions, AP inventory, and measurement history in Room
 - PNG/JPEG floor-plan import through Android Photo Picker with content and size validation
 - Normalized floor-plan coordinates and two-point scale calibration
-- Permission-aware Wi-Fi scanner with fresh/cached status, scan age, BSSID, RSSI, band, channel, security capabilities, width, and reported Wi-Fi standard
+- Permission-aware Wi-Fi scanner with manual and 30-second automatic refresh, fresh/cached status, scan age, BSSID, RSSI, band, channel, security capabilities, width, and reported Wi-Fi standard
 - Named Wi-Fi scanner snapshots with frozen signal/network values, local dashboard history, individual delete, and Clear All
 - Connected-AP signal meter with rolling average, min/max, standard deviation, history, and editable RSSI thresholds
 - Tap-to-measure point surveys that preserve raw and calibrated RSSI independently
@@ -87,3 +87,5 @@ app/src/main/java/com/arjunren/netsurvey/
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Created by [Arjunren](https://github.com/Arjunren). Source and releases are maintained at [github.com/Arjunren/NetSurvey](https://github.com/Arjunren/NetSurvey).

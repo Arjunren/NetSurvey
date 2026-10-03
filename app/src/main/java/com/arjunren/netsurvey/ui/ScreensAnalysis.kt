@@ -57,12 +57,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.arjunren.netsurvey.NetSurveyApplication
+import com.arjunren.netsurvey.BuildConfig
 import com.arjunren.netsurvey.data.AppSettings
 import com.arjunren.netsurvey.data.local.SurveyObservationRow
 import com.arjunren.netsurvey.domain.HeatCell
@@ -351,6 +353,7 @@ fun ReportsScreen(viewModel: MainViewModel) {
 @Composable
 fun SettingsScreen(viewModel: MainViewModel) {
     val current by viewModel.settings.collectAsStateWithLifecycle()
+    val uriHandler = LocalUriHandler.current
     var draft by remember(current) { mutableStateOf(current) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Text("Measurement settings", style = MaterialTheme.typography.headlineSmall); Text("Thresholds are site profiles, not universal wireless laws.") }
@@ -381,6 +384,17 @@ fun SettingsScreen(viewModel: MainViewModel) {
         item { ToggleRow("Audio indication", draft.audioEnabled) { draft = draft.copy(audioEnabled = it) } }
         item {
             Button(onClick = { viewModel.updateSettings(draft) }, modifier = Modifier.fillMaxWidth()) { Text("Save settings") }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("NetSurvey ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium)
+                    Text("Created by Arjunren")
+                    TextButton(onClick = { uriHandler.openUri("https://github.com/Arjunren/NetSurvey") }) {
+                        Text("View NetSurvey on GitHub")
+                    }
+                }
+            }
         }
         item { Text("All primary data is stored on-device. NetSurvey has no account, analytics, advertising, backend, telemetry, or silent upload.", style = MaterialTheme.typography.bodySmall) }
     }
