@@ -221,12 +221,16 @@ fun ProjectsScreen(viewModel: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("Local projects", style = MaterialTheme.typography.headlineSmall)
-                    Text("No account, backend, analytics, or cloud sync")
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Local projects", style = MaterialTheme.typography.headlineSmall)
+                Text("No account, backend, analytics, or cloud sync")
+                Button(
+                    onClick = { createProject = true },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Text("Create project", modifier = Modifier.padding(start = 8.dp))
                 }
-                Button(onClick = { createProject = true }) { Icon(Icons.Default.Add, null); Text("Project") }
             }
         }
         items(projects, key = { it.id }) { project ->
