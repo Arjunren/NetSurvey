@@ -13,6 +13,8 @@ import androidx.core.content.FileProvider
 import androidx.core.graphics.createBitmap
 import androidx.room.withTransaction
 import com.arjunren.netsurvey.data.local.AccessPointEntity
+import com.arjunren.netsurvey.data.local.SavedWifiSnapshotEntity
+import com.arjunren.netsurvey.data.savedReadingsCsv
 import com.arjunren.netsurvey.data.local.FloorEntity
 import com.arjunren.netsurvey.data.local.FloorPlanEntity
 import com.arjunren.netsurvey.data.local.NetSurveyDatabase
@@ -66,6 +68,12 @@ class ExportService(
     private val dao = database.dao()
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = false; explicitNulls = false }
     private val shareDir get() = File(context.cacheDir, "share").apply { mkdirs() }
+
+    suspend fun exportSavedReadings(readings: List<SavedWifiSnapshotEntity>): File = withContext(Dispatchers.IO) {
+        require(readings.isNotEmpty()) { "There are no readings to export." }
+        cleanupOldExports()
+        File.createTempFile("saved-readings-", ".csv", shareDir).apply { writeText(savedReadingsCsv(readings)) }
+    }
 
     suspend fun exportCsv(projectId: Long): File = withContext(Dispatchers.IO) {
         cleanupOldExports()

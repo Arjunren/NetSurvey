@@ -397,6 +397,8 @@ interface NetSurveyDao {
 
     @Update suspend fun updateProject(value: ProjectEntity)
     @Update suspend fun updateFloor(value: FloorEntity)
+    @Query("UPDATE saved_wifi_snapshots SET name = :name, description = :description WHERE id = :id")
+    suspend fun updateSavedWifiSnapshotNotes(id: Long, name: String, description: String)
 
     @Query("DELETE FROM floor_plans WHERE floorId = :floorId") suspend fun deleteFloorPlan(floorId: Long)
     @Query("DELETE FROM projects WHERE id = :id") suspend fun deleteProject(id: Long)

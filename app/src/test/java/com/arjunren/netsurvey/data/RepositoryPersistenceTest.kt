@@ -62,4 +62,27 @@ class RepositoryPersistenceTest {
         savedAt = savedAt,
         connected = false,
     )
+
+    @Test
+    fun editingReadingNotesPreservesEveryCapturedField() = runBlocking {
+        val captured = snapshot("Dock AP", -67, 100)
+        val id = database.dao().insertSavedWifiSnapshot(captured)
+        database.dao().updateSavedWifiSnapshotNotes(id, "Loading dock", "Behind the steel door")
+        assertEquals(captured.copy(id = id, name = "Loading dock", description = "Behind the steel door"),
+            database.dao().observeSavedWifiSnapshots().first().single())
+    }
+
+    @Test
+    fun projectEditAndDeleteKeepStandaloneReadings() = runBlocking {
+        val repository = NetSurveyRepository(database)
+        val id = repository.createProject("Old name", "ACME", "Arjun")
+        repository.addFloor(id, "Ground")
+        val project = requireNotNull(database.dao().project(id))
+        database.dao().updateProject(project.copy(name = "Warehouse", address = "Dock 1", notes = "Survey at closing"))
+        assertEquals("Dock 1", database.dao().project(id)?.address)
+        database.dao().insertSavedWifiSnapshot(snapshot("AP", -67, 100))
+        database.dao().deleteProject(id)
+        assertEquals(0, database.dao().floorCount())
+        assertEquals(1, database.dao().observeSavedWifiSnapshots().first().size)
+    }
 }

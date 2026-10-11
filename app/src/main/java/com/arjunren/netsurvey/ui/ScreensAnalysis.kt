@@ -359,6 +359,19 @@ fun SettingsScreen(viewModel: MainViewModel) {
         item { Text("Measurement settings", style = MaterialTheme.typography.headlineSmall); Text("Thresholds are site profiles, not universal wireless laws.") }
         item {
             Card {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text("Appearance", style = MaterialTheme.typography.titleMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("system", "light", "dark").forEach { theme ->
+                            FilterChip(draft.theme == theme, { draft = draft.copy(theme = theme) }, { Text(theme.replaceFirstChar { it.uppercase() }) })
+                        }
+                    }
+                    Text("Apply with Save settings below.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        item {
+            Card {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     ThresholdField("Excellent minimum", draft.excellentMin) { draft = draft.copy(excellentMin = it) }
                     ThresholdField("Good minimum", draft.goodMin) { draft = draft.copy(goodMin = it) }

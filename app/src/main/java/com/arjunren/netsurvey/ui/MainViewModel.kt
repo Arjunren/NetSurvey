@@ -23,6 +23,7 @@ import com.arjunren.netsurvey.storage.InstallationPhotoImporter
 import com.arjunren.netsurvey.wifi.ScanStatus
 import com.arjunren.netsurvey.wifi.WifiNetwork
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -107,8 +109,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             floors.collect { list ->
                 val current = _selection.value
-                if (current.projectId != null && current.floorId !in list.map { it.id }) {
-                    _selection.value = current.copy(floorId = list.firstOrNull()?.id, surveyId = null)
+                val onProject = list.filter { it.projectId == current.projectId }
+                if (current.projectId != null && current.floorId !in onProject.map { it.id }) {
+                    _selection.value = current.copy(floorId = onProject.firstOrNull()?.id, surveyId = null)
                 }
             }
         }
@@ -177,6 +180,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearWifiSnapshots() = launchAction("Saved Wi-Fi readings cleared") {
         dao.clearSavedWifiSnapshots()
+    }
+
+    fun editWifiSnapshot(id: Long, name: String, description: String, onComplete: (Boolean) -> Unit) =
+        launchAction("Reading notes updated", onComplete) {
+            require(name.isNotBlank()) { "A name is required." }
+            // RF measurements and capture times deliberately remain immutable.
+            dao.updateSavedWifiSnapshotNotes(id, name.trim(), description.trim())
+        }
+
+    fun editProject(project: ProjectEntity, onComplete: (Boolean) -> Unit) = launchAction("Project updated", onComplete) {
+        require(project.name.isNotBlank()) { "Project name is required." }
+        dao.updateProject(project.copy(name = project.name.trim(), updatedAt = System.currentTimeMillis()))
+    }
+
+    fun deleteProject(id: Long, onComplete: (Boolean) -> Unit) = launchAction("Project deleted", onComplete) {
+        dao.deleteProject(id)
+        if (_selection.value.projectId == id) {
+            _selection.value = AppSelection(projectId = dao.observeProjects().first().firstOrNull()?.id)
+        }
     }
 
     fun addFloor(name: String) = launchAction("Floor added") {
@@ -299,6 +321,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         viewModelScope.launch {
             val result = runCatching { withContext(Dispatchers.IO) { action() } }
+            result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
             result.onSuccess { _messages.emit(UiMessage.Success(success)) }
                 .onFailure { error -> _messages.emit(UiMessage.Error(error.message ?: "The operation could not be completed.")) }
             onComplete?.invoke(result.isSuccess)

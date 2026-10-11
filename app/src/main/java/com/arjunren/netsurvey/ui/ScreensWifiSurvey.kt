@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -43,6 +44,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -69,6 +73,10 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.repeatOnLifecycle
 import com.arjunren.netsurvey.NetSurveyApplication
 import com.arjunren.netsurvey.data.local.FloorPlanEntity
 import com.arjunren.netsurvey.data.local.SurveyPointEntity
@@ -78,6 +86,8 @@ import com.arjunren.netsurvey.wifi.ConnectedWifi
 import com.arjunren.netsurvey.wifi.ScanStatus
 import com.arjunren.netsurvey.wifi.WifiNetwork
 import java.io.File
+import java.text.DateFormat
+import java.util.Date
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -87,8 +97,11 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ScannerScreen(viewModel: MainViewModel) {
     val status by viewModel.scanStatus.collectAsStateWithLifecycle()
-    var band by remember { mutableStateOf("All") }
-    var sort by remember { mutableStateOf("RSSI") }
+    var band by rememberSaveable { mutableStateOf("All") }
+    var sort by rememberSaveable { mutableStateOf("RSSI") }
+    var query by rememberSaveable { mutableStateOf("") }
+    var connectedOnly by rememberSaveable { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
     var selectedNetwork by remember { mutableStateOf<WifiNetwork?>(null) }
     var savingSnapshot by remember { mutableStateOf(false) }
     var latestNetworks by remember { mutableStateOf(emptyList<WifiNetwork>()) }
@@ -97,27 +110,25 @@ fun ScannerScreen(viewModel: MainViewModel) {
     LaunchedEffect(resultNetworks) {
         resultNetworks?.let { latestNetworks = it }
     }
-    LaunchedEffect(autoScan) {
-        while (autoScan) {
-            delay(30_000L)
-            viewModel.requestScan()
+    LaunchedEffect(autoScan, lifecycleOwner) {
+        if (autoScan) lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                delay(30_000L)
+                viewModel.requestScan()
+            }
         }
     }
     val networks = latestNetworks.let { list ->
-        val filtered = if (band == "All") list else list.filter { it.band == band }
+        val filtered = list.filter {
+            (band == "All" || it.band == band) && (!connectedOnly || it.connected) &&
+                (it.ssid.contains(query.trim(), ignoreCase = true) || it.bssid.contains(query.trim(), ignoreCase = true))
+        }
         when (sort) { "SSID" -> filtered.sortedBy { it.ssid }; "Channel" -> filtered.sortedBy { it.channel }; else -> filtered.sortedByDescending { it.rssi } }
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            WifiPermissionCard {
-                viewModel.requestScan()
-                autoScan = true
-            }
-        }
-        item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Nearby network scanner", style = MaterialTheme.typography.headlineSmall)
-                Text("Scan results update when Android provides a new snapshot. Automatic refresh runs every 30 seconds and keeps the previous list visible while refreshing.")
+                SectionHeading("Nearby networks", "Discover access points and save a fixed reading with one tap.")
                 Button(
                     onClick = {
                         viewModel.requestScan()
@@ -137,6 +148,9 @@ fun ScannerScreen(viewModel: MainViewModel) {
                 }
             }
         }
+        item {
+            WifiPermissionCard { viewModel.requestScan(); autoScan = true }
+        }
         if (status is ScanStatus.Scanning) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         if (status is ScanStatus.Unavailable) item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -147,9 +161,23 @@ fun ScannerScreen(viewModel: MainViewModel) {
             val result = status as ScanStatus.Results
             Text(if (result.fresh) "Fresh scan • ${networks.size} BSSIDs" else "Cached scan • ${networks.size} BSSIDs — Android may have throttled the request")
         }
+        if (latestNetworks.isNotEmpty()) item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("${latestNetworks.size} access points • ${latestNetworks.map { it.ssid }.distinct().size} SSIDs", style = MaterialTheme.typography.titleMedium)
+                    Text(latestNetworks.groupingBy { it.band }.eachCount().entries.joinToString("   /   ") { "${it.key}: ${it.value}" }, style = MaterialTheme.typography.bodySmall)
+                    Text("${networks.size} matching your filters", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+        item {
+            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text("Search SSID or BSSID") }, leadingIcon = { Icon(Icons.Default.Search, null) })
+        }
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("All", "2.4 GHz", "5 GHz", "6 GHz").forEach { item -> FilterChip(selected = band == item, onClick = { band = item }, label = { Text(item) }) }
+                FilterChip(connectedOnly, { connectedOnly = !connectedOnly }, { Text("Connected only") })
             }
         }
         item {
@@ -160,7 +188,7 @@ fun ScannerScreen(viewModel: MainViewModel) {
         items(networks, key = { "${it.bssid}-${it.frequencyMhz}" }) { network ->
             NetworkRow(network, onClick = { selectedNetwork = network })
         }
-        if (networks.isEmpty() && status !is ScanStatus.Scanning) item { EmptyState("No scan results", "Grant permissions, enable Wi-Fi and Location services, then request a scan.") }
+        if (networks.isEmpty() && status !is ScanStatus.Scanning) item { EmptyState(if (latestNetworks.isEmpty()) "Ready to discover" else "No matching networks", if (latestNetworks.isEmpty()) "Grant Wi-Fi access below if needed, enable Wi-Fi and Location, then tap Scan." else "Change your search or filters to see more access points.") }
     }
 
     selectedNetwork?.let { network ->
@@ -185,7 +213,8 @@ private fun NetworkRow(network: WifiNetwork, onClick: () -> Unit) {
         onClick = onClick,
         colors = if (network.connected) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.cardColors(),
     ) {
-        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("${network.rssi}", fontSize = 25.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             Text(" dBm", style = MaterialTheme.typography.labelSmall)
             Column(Modifier.weight(1f).padding(start = 14.dp)) {
@@ -195,7 +224,13 @@ private fun NetworkRow(network: WifiNetwork, onClick: () -> Unit) {
                 Text(network.capabilities, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                 Text("Tap to save this reading", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
-            if (network.connected) Text("CONNECTED", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (network.connected) StatusLabel("Connected")
+            network.wifiStandard?.let { StatusLabel(it) }
+            StatusLabel("Observed ${DateFormat.getTimeInstance().format(Date(network.timestampMillis))}")
+        }
+        LinearProgressIndicator(progress = { ((network.rssi + 100) / 70f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -246,13 +281,19 @@ fun SignalMeterScreen(viewModel: MainViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     var running by remember { mutableStateOf(false) }
     val samples = remember { mutableStateListOf<Int>() }
-    val connected by produceState<ConnectedWifi?>(initialValue = null, running) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var sampleBssid by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(settings.calibrationOffsetDb) { samples.clear() }
+    val connected by produceState<ConnectedWifi?>(initialValue = null, running, settings.calibrationOffsetDb, lifecycleOwner) {
         if (!running) return@produceState
-        app.container.wifi.connectedSamples().collect { info ->
-            value = info
-            info?.let {
-                samples += it.rssi + settings.calibrationOffsetDb
-                while (samples.size > 120) samples.removeAt(0)
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            app.container.wifi.connectedSamples().collect { info ->
+                value = info
+                info?.let {
+                    if (sampleBssid != it.bssid) { samples.clear(); sampleBssid = it.bssid }
+                    samples += it.rssi + settings.calibrationOffsetDb
+                    while (samples.size > 120) samples.removeAt(0)
+                }
             }
         }
     }
@@ -260,12 +301,24 @@ fun SignalMeterScreen(viewModel: MainViewModel) {
     val thresholds = runCatching { RssiThresholds(settings.excellentMin, settings.goodMin, settings.acceptableMin, settings.weakMin) }.getOrDefault(RssiThresholds())
     val quality = stats?.current?.toInt()?.let(thresholds::classify)
     val window = (context as? android.app.Activity)?.window
-    LaunchedEffect(running, settings.keepAwake) {
-        if (running && settings.keepAwake) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        else window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    DisposableEffect(running, settings.keepAwake, lifecycleOwner, window) {
+        val updateWindow = {
+            if (running && settings.keepAwake && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        val observer = LifecycleEventObserver { _, _ -> updateWindow() }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        updateWindow()
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer); window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item {
+            Button(onClick = { running = !running }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                Icon(if (running) Icons.Default.Stop else Icons.Default.PlayArrow, null)
+                Text(if (running) "Stop measurement" else "Start live measurement", Modifier.padding(start = 8.dp))
+            }
+        }
         item {
             WifiPermissionCard {
                 samples.clear()
@@ -275,15 +328,16 @@ fun SignalMeterScreen(viewModel: MainViewModel) {
         item {
             Surface(color = Color.Black, contentColor = Color.White, shape = MaterialTheme.shapes.extraLarge) {
                 Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(stats?.current?.toInt()?.toString() ?: "—", fontSize = 72.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                    Text(if (running) "LIVE / CONNECTED AP" else "MEASUREMENT PAUSED", style = MaterialTheme.typography.labelLarge)
+                    Text(if (running && connected == null) "—" else stats?.current?.toInt()?.toString() ?: "—", fontSize = 72.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
                     Text("dBm", style = MaterialTheme.typography.titleLarge)
-                    Text(quality?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "Not measuring", style = MaterialTheme.typography.headlineMedium)
-                    Text("Device-specific thresholds; not a universal RF guarantee.")
+                    Text(if (running && connected == null) "Waiting for Wi-Fi" else quality?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "Ready to measure", style = MaterialTheme.typography.headlineSmall)
+                    Text("Device-specific thresholds • calibrated RSSI", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Stat("Average", stats?.average?.let { "%.1f".format(it) } ?: "—")
                 Stat("Minimum", stats?.minimum?.toString() ?: "—")
                 Stat("Maximum", stats?.maximum?.toString() ?: "—")
@@ -291,6 +345,10 @@ fun SignalMeterScreen(viewModel: MainViewModel) {
             }
         }
         item { SignalChart(samples) }
+        item {
+            Text("Variation (σ): ${stats?.standardDeviation?.let { "%.1f dB".format(it) } ?: "—"} • last ${samples.size} samples • 1-second sampling", style = MaterialTheme.typography.bodySmall)
+            Text("History resets when the connected BSSID or calibration offset changes.", style = MaterialTheme.typography.bodySmall)
+        }
         if (running && connected == null) {
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -309,20 +367,12 @@ fun SignalMeterScreen(viewModel: MainViewModel) {
                         Text(info.bssid, fontFamily = FontFamily.Monospace)
                         Text("${info.band} • channel ${info.channel ?: "?"} • ${info.frequencyMhz} MHz")
                         Text("Link ${info.linkSpeedMbps ?: "—"} Mbps • Tx ${info.txLinkSpeedMbps ?: "—"} • Rx ${info.rxLinkSpeedMbps ?: "—"}")
-                        Text("Connected AP live sample • age < 1 second", style = MaterialTheme.typography.labelMedium)
+                        Text("Last sample ${DateFormat.getTimeInstance().format(Date(info.timestampMillis))}${if (running) " • monitoring" else " • paused"}", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
         }
-        item {
-            Button(
-                onClick = { running = !running; if (running) samples.clear() },
-                modifier = Modifier.fillMaxWidth().height(58.dp),
-            ) {
-                Icon(if (running) Icons.Default.Stop else Icons.Default.PlayArrow, null)
-                Text(if (running) "Stop measurement" else "Start live measurement", modifier = Modifier.padding(start = 8.dp))
-            }
-        }
+        item { OutlinedButton(enabled = samples.isNotEmpty(), onClick = { samples.clear() }, modifier = Modifier.fillMaxWidth()) { Text("Reset signal history") } }
     }
 }
 
@@ -330,11 +380,14 @@ fun SignalMeterScreen(viewModel: MainViewModel) {
 
 @Composable
 private fun SignalChart(samples: List<Int>) {
+    val lineColor = MaterialTheme.colorScheme.primary
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
     Card {
         Column(Modifier.padding(14.dp)) {
             Text("Signal history", style = MaterialTheme.typography.titleMedium)
+            Text("−30 dBm (strong) to −100 dBm (weak) • chronological", style = MaterialTheme.typography.bodySmall)
             Canvas(Modifier.fillMaxWidth().height(150.dp).padding(top = 8.dp)) {
-                drawLine(Color.Gray, Offset(0f, size.height * .5f), Offset(size.width, size.height * .5f), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f)))
+                listOf(0f, .5f, 1f).forEach { fraction -> drawLine(gridColor, Offset(0f, size.height * fraction), Offset(size.width, size.height * fraction), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))) }
                 if (samples.size > 1) {
                     val path = androidx.compose.ui.graphics.Path()
                     samples.forEachIndexed { index, value ->
@@ -342,9 +395,10 @@ private fun SignalChart(samples: List<Int>) {
                         val y = ((-30 - value).coerceIn(0, 70) / 70f) * size.height
                         if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
                     }
-                    drawPath(path, Color(0xFF0C8B9D), style = Stroke(width = 5f))
+                    drawPath(path, lineColor, style = Stroke(width = 5f))
                 }
             }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Older", style = MaterialTheme.typography.labelSmall); Text("Latest", style = MaterialTheme.typography.labelSmall) }
         }
     }
 }
@@ -374,7 +428,7 @@ fun SurveyScreen(viewModel: MainViewModel) {
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("2. Select survey", style = MaterialTheme.typography.titleMedium)
+                Text("2. Select survey", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 FilledTonalButton(enabled = selection.floorId != null, onClick = { startDialog = true }) { Icon(Icons.Default.PlayArrow, null); Text("New survey") }
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -382,7 +436,7 @@ fun SurveyScreen(viewModel: MainViewModel) {
             }
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column { Text("3. Tap your position", style = MaterialTheme.typography.titleMedium); Text("Coordinates are normalized; indoor position is manually anchored.") }
                 OutlinedButton(enabled = plan != null, onClick = { calibrationMode = true; calibrationPoints = emptyList(); pending = null }) { Text(if (calibrationMode) "Tap 2 scale points" else "Calibrate scale") }
             }
@@ -402,7 +456,7 @@ fun SurveyScreen(viewModel: MainViewModel) {
                     Column(Modifier.padding(16.dp)) {
                         Text("Pending position: ${(point.first * 100).toInt()}%, ${(point.second * 100).toInt()}%")
                         Text("Measure saves the latest Android scan snapshot with scan age and confidence metadata.")
-                        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(enabled = selection.surveyId != null, onClick = { viewModel.measureAt(point.first, point.second); pending = null }) { Icon(Icons.Default.Save, null); Text("Measure & save") }
                             OutlinedButton(onClick = { apDialog = true }) { Icon(Icons.Default.AddLocationAlt, null); Text("Place AP") }
                         }
@@ -411,9 +465,9 @@ fun SurveyScreen(viewModel: MainViewModel) {
             }
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = viewModel::requestScan) { Icon(Icons.Default.Refresh, null); Text("Refresh scan snapshot") }
-                Text("${points.size} measured points", modifier = Modifier.align(Alignment.CenterVertically))
+                Text("${points.size} measured points", modifier = Modifier.padding(vertical = 12.dp))
             }
         }
     }
@@ -437,6 +491,7 @@ private fun FloorPlanCanvas(
     calibration: List<Pair<Double, Double>>,
     onTap: (Double, Double) -> Unit,
 ) {
+    val currentOnTap by rememberUpdatedState(onTap)
     val image by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, plan?.localPath) {
         value = withContext(Dispatchers.IO) { plan?.localPath?.let { BitmapFactory.decodeFile(it)?.asImageBitmap() } }
     }
@@ -444,7 +499,7 @@ private fun FloorPlanCanvas(
     Box(
         Modifier.fillMaxWidth().aspectRatio(ratio).heightIn(min = 280.dp, max = 600.dp)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.shapes.medium)
-            .pointerInput(Unit) { detectTapGestures { offset -> onTap((offset.x / size.width).toDouble(), (offset.y / size.height).toDouble()) } },
+            .pointerInput(Unit) { detectTapGestures { offset -> currentOnTap((offset.x / size.width).toDouble(), (offset.y / size.height).toDouble()) } },
     ) {
         Canvas(Modifier.fillMaxSize()) {
             image?.let { drawImage(it, dstSize = IntSize(size.width.toInt(), size.height.toInt())) }

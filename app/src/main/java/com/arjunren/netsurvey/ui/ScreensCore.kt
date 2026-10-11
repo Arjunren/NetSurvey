@@ -4,6 +4,13 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
+import android.content.pm.PackageManager
+import android.location.LocationManager
+import androidx.core.content.ContextCompat
+import androidx.core.content.getSystemService
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,6 +33,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apartment
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Map
@@ -57,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -75,31 +88,52 @@ fun DashboardScreen(viewModel: MainViewModel, navigate: (AppScreen) -> Unit) {
     val surveys by viewModel.surveys.collectAsStateWithLifecycle()
     val rows by viewModel.surveyRows.collectAsStateWithLifecycle()
     val savedReadings by viewModel.savedWifiSnapshots.collectAsStateWithLifecycle()
-    var confirmClearReadings by remember { mutableStateOf(false) }
-    val weakCount = rows.groupBy { it.pointId }.count { (_, values) -> values.maxOfOrNull { it.displayedRssi }?.let { it < -72 } == true }
+    val activeProject by viewModel.activeProject.collectAsStateWithLifecycle()
+    val plan by viewModel.floorPlan.collectAsStateWithLifecycle()
+    val selection by viewModel.selection.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val weakCount = rows.groupBy { it.pointId }.count { (_, values) -> values.maxOfOrNull { it.displayedRssi }?.let { it < settings.acceptableMin } == true }
+    val selectedFloor = floors.firstOrNull { it.id == selection.floorId }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().testTag("dashboard-content"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.extraLarge) {
-                Column(Modifier.padding(22.dp)) {
-                    Text("Field-ready Wi-Fi intelligence", style = MaterialTheme.typography.headlineMedium)
-                    Text("Measurements stay on this device. Predicted and interpolated values are always identified.", modifier = Modifier.padding(top = 8.dp))
+            Surface(color = androidx.compose.ui.graphics.Color(0xFF132F43), contentColor = androidx.compose.ui.graphics.Color.White, shape = MaterialTheme.shapes.extraLarge) {
+                Column(Modifier.fillMaxWidth().padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("NETSURVEY / FIELD WORKSPACE", style = MaterialTheme.typography.labelMedium)
+                    Text("Know your network.\nPlan with confidence.", style = MaterialTheme.typography.headlineMedium)
+                    Text("Scan, capture and map your Wi-Fi. Your measurements stay on this device.")
+                    FilledTonalButton(onClick = { navigate(AppScreen.Scanner) }) { Icon(Icons.Default.NetworkWifi, null); Text("Scan nearby networks", Modifier.padding(start = 8.dp)) }
                 }
             }
         }
         item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricCard("Projects", projects.size.toString(), Icons.Default.Apartment)
-                MetricCard("Floors", floors.size.toString(), Icons.Default.Layers)
-                MetricCard("Surveys", surveys.size.toString(), Icons.Default.Map)
-                MetricCard("Points", points.size.toString(), Icons.Default.Speed)
-                MetricCard("Access points", aps.size.toString(), Icons.Default.NetworkWifi)
-                MetricCard("Weak zones", weakCount.toString(), Icons.Default.Map)
-                MetricCard("Saved readings", savedReadings.size.toString(), Icons.Default.NetworkWifi)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MetricCard("Projects", projects.size.toString(), Icons.Default.Apartment, Modifier.weight(1f))
+                    MetricCard("Saved readings", savedReadings.size.toString(), Icons.Default.NetworkWifi, Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MetricCard("Measured points", points.size.toString(), Icons.Default.Speed, Modifier.weight(1f))
+                    MetricCard("Weak zones", weakCount.toString(), Icons.Default.Map, Modifier.weight(1f))
+                }
+                Text("Points and weak zones refer to the active survey.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(activeProject?.name ?: "Set up your first site", style = MaterialTheme.typography.titleLarge)
+                    Text(selectedFloor?.let { "${it.name} • ${surveys.size} sessions • ${aps.size} access points" } ?: "Create a project, add a floor, then import your floor plan.")
+                    Text("${if (activeProject != null) "✓" else "1"} Project   /   ${if (selectedFloor != null) "✓" else "2"} Floor   /   ${if (plan != null) "✓" else "3"} Plan", style = MaterialTheme.typography.labelLarge)
+                    if (plan != null) Text(if (selectedFloor?.calibrationMeters != null) "Scale calibrated • ready for a site survey" else "Next: calibrate scale in Survey using a known distance.", style = MaterialTheme.typography.bodySmall)
+                    FilledTonalButton(onClick = { navigate(if (plan == null) AppScreen.Projects else AppScreen.Survey) }) {
+                        Text(if (activeProject == null) "Create your first project" else if (plan == null) "Continue site setup" else "Open site survey")
+                    }
+                }
             }
         }
         item { Text("Quick actions", style = MaterialTheme.typography.titleLarge) }
@@ -126,40 +160,25 @@ fun DashboardScreen(viewModel: MainViewModel, navigate: (AppScreen) -> Unit) {
         if (savedReadings.isNotEmpty()) {
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column {
+                    Column(Modifier.weight(1f)) {
                         Text("Saved Wi-Fi readings", style = MaterialTheme.typography.titleLarge)
-                        Text("Frozen scanner values stored in the local database")
+                        Text("Recent snapshots • frozen at capture", style = MaterialTheme.typography.bodySmall)
                     }
-                    TextButton(onClick = { confirmClearReadings = true }) {
-                        Icon(Icons.Default.DeleteSweep, contentDescription = null)
-                        Text("Clear all")
+                    TextButton(onClick = { navigate(AppScreen.Readings) }) {
+                        Text("View all")
                     }
                 }
             }
-            items(savedReadings, key = { "saved-${it.id}" }) { reading ->
-                SavedWifiReadingRow(reading, onDelete = { viewModel.deleteWifiSnapshot(reading.id) })
+            items(savedReadings.take(3), key = { "saved-${it.id}" }) { reading ->
+                SavedWifiReadingRow(reading)
             }
         }
     }
 
-    if (confirmClearReadings) {
-        AlertDialog(
-            onDismissRequest = { confirmClearReadings = false },
-            title = { Text("Clear saved readings?") },
-            text = { Text("This permanently deletes all saved Wi-Fi scanner snapshots from this device.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.clearWifiSnapshots()
-                    confirmClearReadings = false
-                }) { Text("Clear all") }
-            },
-            dismissButton = { TextButton(onClick = { confirmClearReadings = false }) { Text("Cancel") } },
-        )
-    }
 }
 
 @Composable
-private fun SavedWifiReadingRow(reading: SavedWifiSnapshotEntity, onDelete: () -> Unit) {
+fun SavedWifiReadingRow(reading: SavedWifiSnapshotEntity, onDelete: (() -> Unit)? = null, onEdit: (() -> Unit)? = null) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -168,7 +187,10 @@ private fun SavedWifiReadingRow(reading: SavedWifiSnapshotEntity, onDelete: () -
                     if (reading.description.isNotBlank()) Text(reading.description)
                 }
                 Text("${reading.rssi} dBm", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = "Delete ${reading.name}") }
+            }
+            if (onEdit != null || onDelete != null) Row {
+                onEdit?.let { TextButton(onClick = it) { Icon(Icons.Default.Edit, null); Text("Edit notes", Modifier.padding(start = 6.dp)) } }
+                onDelete?.let { TextButton(onClick = it) { Icon(Icons.Default.Delete, null); Text("Delete", Modifier.padding(start = 6.dp)) } }
             }
             Text(reading.ssid.ifBlank { "Hidden SSID" }, style = MaterialTheme.typography.titleSmall)
             Text(reading.bssid, style = MaterialTheme.typography.bodySmall)
@@ -184,14 +206,14 @@ private fun SavedWifiReadingRow(reading: SavedWifiSnapshotEntity, onDelete: () -
 }
 
 @Composable
-private fun MetricCard(label: String, value: String, icon: ImageVector) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Column(Modifier.padding(start = 10.dp)) {
+private fun MetricCard(label: String, value: String, icon: ImageVector, modifier: Modifier = Modifier) {
+    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(label, style = MaterialTheme.typography.labelMedium)
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             }
+            Text(label, style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -213,6 +235,11 @@ fun ProjectsScreen(viewModel: MainViewModel) {
     var createProject by remember { mutableStateOf(false) }
     var creatingProject by remember { mutableStateOf(false) }
     var addFloor by remember { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var editing by remember { mutableStateOf<ProjectEntity?>(null) }
+    var deleting by remember { mutableStateOf<ProjectEntity?>(null) }
+    var updating by remember { mutableStateOf(false) }
+    val visibleProjects = projects.filter { listOf(it.name, it.customer, it.address, it.engineer).any { text -> text.contains(query.trim(), ignoreCase = true) } }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(viewModel::importFloorPlan) }
 
     LazyColumn(
@@ -222,8 +249,7 @@ fun ProjectsScreen(viewModel: MainViewModel) {
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Local projects", style = MaterialTheme.typography.headlineSmall)
-                Text("No account, backend, analytics, or cloud sync")
+                SectionHeading("Site projects", "${projects.size} local projects • tap a site to make it active")
                 Button(
                     onClick = { createProject = true },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -231,20 +257,23 @@ fun ProjectsScreen(viewModel: MainViewModel) {
                     Icon(Icons.Default.Add, contentDescription = null)
                     Text("Create project", modifier = Modifier.padding(start = 8.dp))
                 }
+                OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search projects") }, leadingIcon = { Icon(Icons.Default.Search, null) })
             }
         }
-        items(projects, key = { it.id }) { project ->
-            ProjectRow(project, selection.projectId == project.id) { viewModel.selectProject(project.id) }
+        items(visibleProjects, key = { it.id }) { project ->
+            ProjectRow(project, selection.projectId == project.id, { editing = project }, { deleting = project }) { viewModel.selectProject(project.id) }
         }
+        if (projects.isNotEmpty() && visibleProjects.isEmpty()) item { EmptyState("No matching projects", "Try another project name, customer, address or engineer.") }
         if (projects.isEmpty()) {
             item { EmptyState("No projects yet", "Create a project to start documenting a site.") }
         } else {
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Floors", style = MaterialTheme.typography.titleLarge)
-                    FilledTonalButton(onClick = { addFloor = true }) { Icon(Icons.Default.Add, null); Text("Floor") }
+                    Text("Active site's floors", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                    FilledTonalButton(enabled = selection.projectId != null, onClick = { addFloor = true }) { Icon(Icons.Default.Add, null); Text("Floor") }
                 }
             }
+            if (floors.isEmpty()) item { EmptyState("Add your first floor", "Use + Floor above, then import its PNG or JPEG floor plan.") }
             item {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     floors.forEach { floor ->
@@ -294,21 +323,54 @@ fun ProjectsScreen(viewModel: MainViewModel) {
             addFloor = false
         }
     }
+    editing?.let { project ->
+        EditProjectDialog(project, updating, { if (!updating) editing = null }) { changed ->
+            updating = true
+            viewModel.editProject(changed) { success -> updating = false; if (success) editing = null }
+        }
+    }
+    deleting?.let { project ->
+        AlertDialog(onDismissRequest = { if (!updating) deleting = null }, title = { Text("Delete ${project.name}?") },
+            text = { Text("This permanently deletes the project and its floors, surveys, measurements, access points and report records. Export a project backup in Reports first if needed. Standalone scanner readings are kept.") },
+            confirmButton = { TextButton(enabled = !updating, onClick = { updating = true; viewModel.deleteProject(project.id) { success -> updating = false; if (success) deleting = null } }) { Text(if (updating) "Deleting…" else "Delete project") } },
+            dismissButton = { TextButton(enabled = !updating, onClick = { deleting = null }) { Text("Cancel") } })
+    }
 }
 
 @Composable
-private fun ProjectRow(project: ProjectEntity, selected: Boolean, onClick: () -> Unit) {
+private fun ProjectRow(project: ProjectEntity, selected: Boolean, onEdit: () -> Unit, onDelete: () -> Unit, onClick: () -> Unit) {
     Card(onClick = onClick, colors = if (selected) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer) else CardDefaults.cardColors()) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Apartment, contentDescription = null, modifier = Modifier.size(36.dp))
-            Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                Text(project.name, style = MaterialTheme.typography.titleMedium)
-                Text(project.customer.ifBlank { "No customer/site name" })
-                Text("Updated ${DateFormat.getDateInstance().format(Date(project.updatedAt))}", style = MaterialTheme.typography.labelSmall)
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Apartment, contentDescription = null, modifier = Modifier.size(36.dp))
+                Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                    Text(project.name, style = MaterialTheme.typography.titleMedium)
+                    Text(project.customer.ifBlank { "No customer/site name" })
+                    Text("Updated ${DateFormat.getDateInstance().format(Date(project.updatedAt))}", style = MaterialTheme.typography.labelSmall)
+                }
+                if (selected) AssistChip(onClick = onClick, label = { Text("Active") })
             }
-            if (selected) AssistChip(onClick = onClick, label = { Text("Active") })
+            Row {
+                TextButton(onClick = onEdit) { Icon(Icons.Default.Edit, null); Text("Edit", Modifier.padding(start = 6.dp)) }
+                TextButton(onClick = onDelete) { Icon(Icons.Default.Delete, null); Text("Delete", Modifier.padding(start = 6.dp)) }
+            }
         }
     }
+}
+
+@Composable
+private fun EditProjectDialog(project: ProjectEntity, saving: Boolean, dismiss: () -> Unit, save: (ProjectEntity) -> Unit) {
+    var draft by remember(project.id) { mutableStateOf(project) }
+    AlertDialog(onDismissRequest = dismiss, title = { Text("Edit project") }, text = {
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(draft.name, { draft = draft.copy(name = it) }, label = { Text("Project name *") }, singleLine = true)
+            OutlinedTextField(draft.customer, { draft = draft.copy(customer = it) }, label = { Text("Customer / site") }, singleLine = true)
+            OutlinedTextField(draft.engineer, { draft = draft.copy(engineer = it) }, label = { Text("Engineer") }, singleLine = true)
+            OutlinedTextField(draft.address, { draft = draft.copy(address = it) }, label = { Text("Site address") })
+            OutlinedTextField(draft.notes, { draft = draft.copy(notes = it) }, label = { Text("Site notes") }, minLines = 2, maxLines = 4)
+        }
+    }, confirmButton = { TextButton(enabled = draft.name.isNotBlank() && !saving, onClick = { save(draft) }) { Text(if (saving) "Saving…" else "Save") } },
+        dismissButton = { TextButton(enabled = !saving, onClick = dismiss) { Text("Cancel") } })
 }
 
 @Composable
@@ -320,7 +382,7 @@ private fun ProjectDialog(saving: Boolean, onDismiss: () -> Unit, onSave: (Strin
         onDismissRequest = onDismiss,
         title = { Text("New project") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text("Project name *") }, singleLine = true)
                 OutlinedTextField(customer, { customer = it }, label = { Text("Customer / site") }, singleLine = true)
                 OutlinedTextField(engineer, { engineer = it }, label = { Text("Engineer") }, singleLine = true)
@@ -365,11 +427,25 @@ fun WifiPermissionCard(onGranted: () -> Unit = {}) {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         if (result.values.all { it }) onGranted()
     }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    fun accessReady(): Boolean {
+        val location = context.getSystemService<LocationManager>()
+        val locationEnabled = if (Build.VERSION.SDK_INT >= 28) location?.isLocationEnabled == true
+        else location?.let { it.isProviderEnabled(LocationManager.GPS_PROVIDER) || it.isProviderEnabled(LocationManager.NETWORK_PROVIDER) } == true
+        return locationEnabled && permissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+    }
+    var ready by remember { mutableStateOf(accessReady()) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ -> ready = accessReady() }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    if (ready) return
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
         Column(Modifier.padding(16.dp)) {
             Text("Wi-Fi access", style = MaterialTheme.typography.titleMedium)
             Text("Android requires precise location for active Wi-Fi scan results, plus Nearby Wi-Fi on Android 13+. NetSurvey does not record GPS location.")
-            Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { launcher.launch(permissions) }) { Text("Grant permissions") }
                 OutlinedButton(onClick = { context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }) { Text("Location settings") }
             }

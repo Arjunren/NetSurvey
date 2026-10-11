@@ -10,7 +10,10 @@ The primary field target is the POCO F5. The app remains useful on other Android
 - PNG/JPEG floor-plan import through Android Photo Picker with content and size validation
 - Normalized floor-plan coordinates and two-point scale calibration
 - Permission-aware Wi-Fi scanner with manual and 30-second automatic refresh, fresh/cached status, scan age, BSSID, RSSI, band, channel, security capabilities, width, and reported Wi-Fi standard
-- Named Wi-Fi scanner snapshots with frozen signal/network values, local dashboard history, individual delete, and Clear All
+- Named Wi-Fi scanner snapshots with frozen signal/network values, searchable library, band filters, newest/strongest/name sorting, editable notes, filtered CSV sharing, and confirmed delete/Clear All
+- Guided site-setup dashboard, persistent bottom navigation, scrollable tool drawer, consistent professional light/dark/system themes
+- Searchable projects with customer/engineer/address/notes editing and confirmed project deletion
+- Scanner SSID/BSSID search, connected-only filtering, per-band counts and timestamped signal cards
 - Connected-AP signal meter with rolling average, min/max, standard deviation, history, and editable RSSI thresholds
 - Tap-to-measure point surveys that preserve raw and calibrated RSSI independently
 - Measured-point RSSI heatmaps using bounded, cancellable inverse-distance weighting; interpolated areas are labeled as such
@@ -19,6 +22,14 @@ The primary field target is the POCO F5. The app remains useful on other Android
 - PDF report, CSV measurements, privacy-conscious PNG heatmap, and versioned ZIP backup/restore
 - Android Sharesheet via narrow `FileProvider` `content://` access and temporary read grants
 - Local DataStore settings; no login, analytics, advertising, backend, or cloud sync
+
+## Version 1.1.0
+
+Open **Projects** in the bottom bar, tap **Create project**, enter a name, then tap **Create**. Add a floor and import a PNG/JPEG to prepare a site survey. The Dashboard guides the next setup step.
+
+Open **Readings** to search saved scanner snapshots, edit their names/notes or export the currently filtered list as CSV. Signal values and capture timestamps stay frozen. CSV contains detailed infrastructure information; sharing and permanent deletion both require confirmation. Standalone readings are independent of projects and are not included in a project ZIP backup; use the reading-library CSV to export them.
+
+Live scanner refresh and signal sampling run only while their screen is foreground. The meter retains its rolling history when paused, supports reset, and starts a new history on a BSSID or calibration change. Its black background and white text are preserved in every theme.
 
 ## Technical honesty
 

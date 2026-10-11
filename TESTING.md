@@ -10,13 +10,26 @@
 
 Pure JVM tests cover channel/frequency mapping, RSSI classification, rolling statistics, calibration, IDW interpolation, wall intersection, propagation loss, AP candidate scoring, CSV escaping, ZIP path validation, and MIME selection.
 
-Instrumented tests cover transactional measurement insertion, foreign-key cascade behavior, and a Compose dashboard smoke test:
+Robolectric tests also cover PNG floor-plan imports, project persistence, reading-note edits that preserve every captured field, and project deletion that leaves standalone readings intact. JVM library tests cover combined filters, deterministic sorting, CSV escaping and spreadsheet-formula neutralization.
+
+Instrumented tests cover transactional measurement insertion, foreign-key cascades, dashboard launch, bottom-navigation return, visible project creation and reading-library note editing/clear cancellation:
 
 ```powershell
 ./gradlew connectedDebugAndroidTest
 ```
 
 ## POCO F5 field matrix
+
+### Version 1.1.0 verification (2026-10-11)
+
+- 19 JVM/Robolectric tests passed.
+- 6 instrumented tests passed on the Android 16 / API 36.1 Medium Phone emulator.
+- Debug APK and optimized unsigned release APK built successfully.
+- Debug lint: 0 errors, 8 existing toolchain/dependency recommendations.
+- Visually inspected the dashboard, scanner and black/white signal meter. The emulator reported a fresh `AndroidWifi` scan and its connected-AP RSSI of −50 dBm; these are virtual-radio checks, not physical RF validation.
+- Physical POCO F5 field checks below remain required.
+
+### Hardware checks
 
 Run with the shipping device and current HyperOS/Android update:
 
